@@ -7,6 +7,17 @@ A Snakemake-based pipeline for efficient **gap patching** in large genomes.
 The workflow was developed to address the prohibitive computational cost of performing whole-genome alignments on exceptionally large genomes while reducing misalignments caused by abundant repetitive sequences.
 Instead of aligning all contigs to entire chromosomes, the pipeline adopts a **contig-terminus anchoring + candidate enrichment** strategy to identify high-confidence gap-bridging contigs.
 
+### <a name="Dependencies"></a>Dependencies
+
+The following tools are required and are assumed to be available in your environment (e.g. via `conda`, `mamba`, or system modules):
+
+* [Snakemake](https://snakemake.readthedocs.io/) – workflow management
+* [Perl](https://www.perl.org/) – used for helper scripts (e.g. candidate enrichment and AGP/PAF processing)
+* [minimap2](https://github.com/lh3/minimap2) – long-read and contig-to-contig alignment
+* [RagTag](https://github.com/malonge/RagTag) – homology-based assembly patching
+* [seqkit](https://github.com/shenwei356/seqkit) – FASTA/FASTQ manipulation
+* [samtools](http://www.htslib.org/) – BAM/CRAM/SAM utilities
+
 ## Installation
 Clone repository:
 ```
