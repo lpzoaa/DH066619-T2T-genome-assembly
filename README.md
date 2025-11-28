@@ -10,8 +10,8 @@ Instead of aligning all contigs to entire chromosomes, the pipeline adopts a **c
 ## Installation
 Clone repository:
 ```
-git clone https://github.com/<your_repo>/OnionGapPatch.git
-cd OnionGapPatch
+git clone https://github.com/lpzoaa/DH066619-T2T-genome-assembly.git
+cd DH066619-T2T-genome-assembly
 ```
 
 ## Configuration
