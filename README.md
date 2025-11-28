@@ -61,8 +61,41 @@ max_gap_margin: <INT>            # Default: 5000000
 
 ## Run
 ```
-snakemake -s gap_patching.smk --cores 32
+# Add utility scripts to PATH
+export PATH=./utils:${PATH}
+
+# Create log directory
+mkdir -p logs
+
+# Execute Snakemake workflow on SLURM cluster
+~/anaconda3/bin/snakemake \
+    --snakefile gap_patching.smk \
+    --configfile config.yaml \
+    --jobs 40 \
+    --cluster-config cluster.yaml \
+    --keep-going \
+    --cluster "sbatch -p {cluster.queue} -c {cluster.nCPUs} -n 1 -N 1 -o {cluster.output} -e {cluster.error}" 
 ```
+
+## Notes
+
+- The workflow relies on a cluster scheduling system (e.g., SLURM, SGE, LSF, PBS).
+- The example run command uses **SLURM** via `sbatch`. If your computing environment uses a different scheduler, you must modify:
+  1. **`cluster.yaml`** — update keys such as `queue`, `nCPUs`, `output`, and `error` to match your system.
+  2. **`--cluster` submission string** — replace the SLURM command  
+     ```
+     sbatch -p {cluster.queue} -c {cluster.nCPUs} -n 1 -N 1 -o {cluster.output} -e {cluster.error}
+     ```
+     with the correct submission command for your scheduler:
+     - **PBS/Torque**: `qsub -q {cluster.queue} -l nodes=1:ppn={cluster.nCPUs}`
+     - **SGE**: `qsub -q {cluster.queue} -pe smp {cluster.nCPUs}`
+     - **LSF**: `bsub -q {cluster.queue} -n {cluster.nCPUs}`
+
+- Before launching full jobs, it is recommended to run:
+  ```
+  snakemake --snakefile gap_patching.smk --configfile config.yaml -np
+  ```
+  to check rule dependencies and confirm cluster settings.
 
 ## Output
 - gap-patched chromosomes  
