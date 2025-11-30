@@ -101,255 +101,145 @@ mkdir -p logs
 - gap-patched chromosomes  
 - updated AGP  
 - final merged genome
-# LG-Patch: One-round manual gap patching (no Snakemake)
+# Step-by-Step Gap Patching Guide 
 
-This document explains how to run **one round** of the LG-Patch gap-patching workflow **step by step on the command line**, without using Snakemake.
+This document provides a **manual step-by-step guide** for performing one round of gap patching **without Snakemake**.
 
-For additional rounds, simply treat the patched assembly (AGP + FASTA) from the previous round as the new input assembly and repeat the procedure with a new set of patching contigs.
-
----
-
-## 1. Required inputs
-
-Assume you have the following files (names adapted from `config.yaml`):
-
-- **Scaffold-level assembly**
-  - `raw_genome` — scaffold-level FASTA (e.g. `DH066619_2.FINAL.split.fa`)
-  - `raw_agp` — corresponding AGP (e.g. `DH066619_2.FINAL.agp`)
-
-- **Patching contigs for this round**
-  - `ctg.fa` — contigs used to patch gaps  
-    - In the original onion workflow:  
-      - Round 1: HiFi/ONT hybrid unitigs (`utg_ctg`)  
-      - Round 2: ONT-only contigs (`ont_ctg`)
-
-- **Per-chromosome information**
-  - `chr.list` — one chromosome/scaffold ID per line (must match column 1 of `raw_agp`), e.g.
-    ```text
-    Chr1
-    Chr2
-    ...
-    ```
-
-- **Utilities (in `./utils/`)**
-  - `split_scaffold_by_agp.pl`
-  - `gap_patch_candidate_enrichment.pl`
-  - `filter_paf_by_de.pl`
-  - `collapse_chr_from_agp.pl`
-
-Make sure `./utils` is on your `PATH`:
-
-```bash
-export PATH=./utils:${PATH}
-```
-
-Create a working directory for this round (here we use `round1`):
-
-```bash
-mkdir -p round1/ref round1/ctg round1/maps round1/candidates round1/ragtag
-```
+If multiple patching rounds are required, simply use the output FASTA + AGP from the previous round as new input and repeat the workflow.
 
 ---
 
-## 2. Split the scaffold assembly into per-chromosome contig FASTA + AGP
+# 🚀 Manual Workflow (One Patching Round)
 
-For each chromosome ID in `chr.list`, split the scaffold-level assembly into contig-level per-chromosome FASTA and AGP:
+## **0. Input Files**
+You need:
 
-```bash
-while read chr; do
-    perl split_scaffold_by_agp.pl \
-        raw_agp \
-        raw_genome \
-        "${chr}" \
-        round1/ref/${chr}.ctg.agp \
-        round1/ref/${chr}.ptg.fa
-done < chr.list
-```
-
-This produces, for each `chr`:
-
-- `round1/ref/${chr}.ctg.agp` — contig-level AGP for that chromosome
-- `round1/ref/${chr}.ptg.fa`   — contig-level FASTA for that chromosome  
-  (these are the **target** sequences for patching)
-
-You also need a **global** contig-level FASTA that concatenates all `*.ptg.fa` for the minimap2 alignment in the next step. The original workflow uses a pre-built `ptg_round1` file; if you do not have one, you can concatenate:
-
-```bash
-cat round1/ref/*.ptg.fa > ptg_round1.fa
-```
+- `raw_genome` — scaffold-level genome FASTA  
+- `raw_agp` — AGP defining scaffold structure  
+- `patch_ctg` — contigs used to patch gaps  
+- `chr_list` — chromosome IDs  
+- threshold parameters  
+  - `de_threshold`  
+  - `ms_threshold`  
+  - `max_gap_margin`
 
 ---
 
-## 3. Map patching contigs to the contig-level target assembly
+# **1. Candidate contig anchoring & enrichment (whole genome)**
 
-Align the patching contigs (`ctg.fa`) to the contig-level assembly (`ptg_round1.fa`) using minimap2 (assembly-to-assembly mode):
-
-```bash
-minimap2 -x asm5 -t 32 ptg_round1.fa ctg.fa > round1/maps/ctg_vs_ptg.raw.paf
-```
-
-You can adjust `-t` according to your available CPUs.
-
----
-
-## 4. Filter alignments by alignment-level error (de-tag)
-
-Filter out low-quality alignments based on the `de:f:` tag (relative error rate) in the PAF file using `filter_paf_by_de.pl`:
-
-```bash
-perl filter_paf_by_de.pl round1/maps/ctg_vs_ptg.raw.paf > round1/maps/ctg_vs_ptg.filtered.paf
-```
-
-The thresholds used for `de` and `ms` are hard-coded in the script and correspond to the ones used in the original pipeline (e.g. `de_utg_threshold`, `de_ont_threshold`).
-
-You can optionally replace the original file:
-
-```bash
-mv round1/maps/ctg_vs_ptg.filtered.paf round1/maps/ctg_vs_ptg.paf
-```
-
----
-
-## 5. Enrich candidate contigs near gaps
-
-Use `gap_patch_candidate_enrichment.pl` to identify contig ends that are good candidates for patching gaps. This script:
-
-- inspects the positions of contig alignments from the filtered PAF,
-- uses `raw_agp` to locate gaps,
-- applies thresholds on `de`, `ms`, and distance to gap boundaries,
-- outputs candidate contig–gap pairs.
-
-Run:
+This step uses contig-end regions as anchors to determine which contigs are useful for gap patching.
 
 ```bash
 perl gap_patch_candidate_enrichment.pl \
-    ptg_round1.fa \
-    ctg.fa \
-    raw_agp \
-    round1/maps/ctg_vs_ptg.paf \
-    round1/candidates/ctg_all.Flanking_region.bed \
-    round1/candidates/ctg.Flanking_region.list \
-    --de-thr 0.001 \
-    --ms-thr 15000 \
-    --max-gap-margin 5000000
+    --genome raw_genome.fa \
+    --agp raw_agp.agp \
+    --contigs patch_ctg.fa \
+    --de <de_threshold> \
+    --ms <ms_threshold> \
+    --margin <max_gap_margin> \
+    > enriched.list
 ```
 
-- `ctg_all.Flanking_region.bed` — flanking intervals of candidate contig ends
-- `ctg.Flanking_region.list` — tab-delimited summary of candidate contig–gap pairs (used below)
-
-You can tune `--de-thr`, `--ms-thr`, and `--max-gap-margin` if needed.
+Output:  
+`enriched.list` — list of contigs suitable for gap patching.
 
 ---
 
-## 6. Build per-chromosome candidate contig sets
-
-For each chromosome, extract the list of contig IDs that are candidates for patching gaps on that chromosome, then build a per-chromosome FASTA of candidate contigs.
-
-### 6.1 Extract contig IDs per chromosome
-
-Assuming `ctg.Flanking_region.list` has contig IDs in **column 4**, create an ID list per chromosome:
-
+# **2. Extract enriched contigs**
 ```bash
-while read chr; do
-    awk -v c="${chr}" '$1 == c {print $4}' round1/candidates/ctg.Flanking_region.list \
-        | sort -u > round1/candidates/${chr}.ctg.ids
-done < chr.list
+seqkit grep -f enriched.list patch_ctg.fa > patch_candidates.fa
 ```
-
-Adjust the column index if your `ctg.Flanking_region.list` format is slightly different.
-
-### 6.2 Extract candidate contig sequences
-
-Use `seqkit` (or `samtools faidx`) to extract the candidate contigs for each chromosome:
-
-```bash
-while read chr; do
-    seqkit faidx ctg.fa \
-        -f round1/candidates/${chr}.ctg.ids \
-        > round1/ctg/${chr}.ctg.fa
-done < chr.list
-```
-
-Now, for each `chr`, you have:
-
-- `round1/ref/${chr}.ptg.fa` — target contig-level assembly for that chromosome
-- `round1/ctg/${chr}.ctg.fa` — candidate patching contigs for that chromosome
 
 ---
 
-## 7. Patch each chromosome with RagTag
-
-For each chromosome, run `ragtag.py patch` to perform homology-based gap patching:
+# **3. Split genome & AGP per chromosome**
+After enrichment, splitting reduces computational load:
 
 ```bash
-while read chr; do
-    outdir="round1/ragtag/${chr}"
-    mkdir -p "${outdir}"
-
-    ragtag.py patch \
-        -t 32 \
-        --aligner minimap2 \
-        --mm2-params "-x asm5" \
-        -o "${outdir}" \
-        round1/ref/${chr}.ptg.fa \
-        round1/ctg/${chr}.ctg.fa
-done < chr.list
+perl collapse_chr_from_agp.pl raw_genome.fa raw_agp.agp chr_list
 ```
 
-This will create, for each `chr`:
+This generates:
 
-- `${outdir}/ragtag.patch.agp`
-- `${outdir}/ragtag.patch.fasta`
-- `${outdir}/ragtag.patch.err` (log file)
+- `<chr>.fa`
+- `<chr>.agp`
 
-You can adjust thread count (`-t`) and minimap2 parameters as needed.
+for each chromosome.
 
 ---
 
-## 8. Collapse per-chromosome AGPs back to genome-level AGP/FASTA
+# **4. Run ragtag patching for each chromosome**
 
-Finally, convert the per-chromosome patched AGPs into a genome-level AGP/FASTA that matches the original scaffold IDs using `collapse_chr_from_agp.pl`.
+Example for chromosome `Chr1`:
 
-First, prepare a list of patched AGP files. For example:
-
+## **Round 1 ragtag patching**
 ```bash
-ls round1/ragtag/*/ragtag.patch.agp > round1/patched_agp.list
+ragtag.py patch \
+    Chr1.fa \
+    patch_candidates.fa \
+    -o Chr1_round1
 ```
 
-Then run (example syntax; adapt to your script’s exact usage):
-
-```bash
-perl collapse_chr_from_agp.pl \
-    raw_agp \
-    chr.list \
-    round1/patched_agp.list \
-    round1/LG-Patch.round1.agp \
-    round1/LG-Patch.round1.fa
-```
-
-### Notes
-
-- `collapse_chr_from_agp.pl` restores the original scaffold names and ordering based on `raw_agp` and `chr.list`, replacing each chromosome segment with its patched version from `ragtag.patch.agp`.
-- If your script expects patched AGPs as individual arguments rather than via a list file, you can expand them using command substitution, for example:
-  ```bash
-  perl collapse_chr_from_agp.pl raw_agp chr.list \
-      $(ls round1/ragtag/*/ragtag.patch.agp) \
-      round1/LG-Patch.round1.agp \
-      round1/LG-Patch.round1.fa
-  ```
+Output:
+- `Chr1_round1/ragtag.patch.fasta`
+- `Chr1_round1/ragtag.patch.agp`
+- `Chr1_round1/ragtag.patch.asm.paf`
 
 ---
 
-## 9. Running additional rounds
+# **5. Filter alignments by DE**
+```bash
+perl filter_paf_by_de.pl Chr1_round1/ragtag.patch.asm.paf > filtered.paf
+mv filtered.paf Chr1_round1/ragtag.patch.asm.paf
+```
 
-To perform a second (or later) round of gap patching:
+---
 
-1. Use `LG-Patch.round1.fa` and `LG-Patch.round1.agp` as the new `raw_genome` / `raw_agp`.
-2. Generate an updated `chr.list` if scaffold IDs changed.
-3. Choose a new contig set (e.g. ONT-only contigs).
-4. Repeat **Steps 2–8** with a new working directory (e.g. `round2/`).
+# **6. Ragtag second pass (reuse filtered alignments)**
 
-You can iterate until additional patching no longer improves the assembly or all large gaps of interest are resolved.
+```bash
+ragtag.py patch \
+    Chr1.fa \
+    patch_candidates.fa \
+    -o Chr1_round2
+```
+
+This step is very fast because ragtag will reuse filtered PAF alignments.
+
+Output:
+- `Chr1_round2/ragtag.patch.fasta`
+- `Chr1_round2/ragtag.patch.agp`
+
+Repeat steps 4–6 for all chromosomes.
+
+---
+
+# 🔁 Multi-Round Patching
+
+If further patching is needed:
+
+## **1. Convert patched AGP back to contig-level FASTA**
+```bash
+perl split_scaffold_by_agp.pl \
+    Chr1_round2/ragtag.patch.agp \
+    Chr1_round2/ragtag.patch.fasta \
+    > new_contigs.fa
+```
+
+## **2. Use new output as next round’s input**
+Set:
+- `raw_genome = patched.fa`
+- `raw_agp = patched.agp`
+- `patch_ctg = new_contigs.fa`
+
+Repeat from **Step 1**.
+
+---
+
+# 📌 Notes
+- Contig enrichment is performed **before** chromosome splitting.  
+
+
 
 ## Contacts
-Pengzheng Lei()
+Pengzheng Lei(lpz@mail.nwpu.edu.cn)
