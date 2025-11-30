@@ -109,8 +109,6 @@ If multiple patching rounds are required, simply use the output FASTA + AGP from
 
 ---
 
-# 🚀 Manual Workflow (One Patching Round)
-
 ## **0. Input Files**
 You need:
 
@@ -131,53 +129,62 @@ This step uses contig-end regions as anchors to determine which contigs are usef
 
 ```bash
 perl gap_patch_candidate_enrichment.pl \
-    --genome raw_genome.fa \
-    --agp raw_agp.agp \
-    --contigs patch_ctg.fa \
-    --de <de_threshold> \
-    --ms <ms_threshold> \
-    --margin <max_gap_margin> \
-    > enriched.list
+      -agp <chr.raw.agp> \
+      -ctg <contig.fa> \ # used for patch
+      -ptg <contig.raw.fa> \
+      -chr-list <chr.list> \
+      -prefix <prefix> \
+      -threads <INT> \
+      --de <FLOAT>  \    #Default: 0.001
+      --ms <INT>  \      #Default: 15000
+      --max-gap <INT>    #Default: 5000000
 ```
 
 Output:  
-`enriched.list` — list of contigs suitable for gap patching.
+`<prefix>.Flanking_region.list` — list of contigs suitable for gap patching.
 
 ---
 
 # **2. Extract enriched contigs**
 ```bash
-seqkit grep -f enriched.list patch_ctg.fa > patch_candidates.fa
+mkdir -p round1/ref
+cat <chr.list>|while read f
+do
+ samtools faidx <chr.raw.fa> $f > round1/ref/${f}.fa
+done
+
+mkdir -p round1/ctg
+cat <chr.list>|while read f
+do
+
+ awk -v C=$f '$1==C && $5=="W" {{print $6}}' {input.agp}  sort -u > round1/ctg/${f}.agp.ctg_ids
+
+ grep -F -f round1/ctg/${f}.agp.ctg_ids {input.flank}| cut -f 1| sort -u > round1/ctg/${f}.ctg_ids
+
+ samtools faidx <contig.fa> -r round1/ctg/${f}.agp.ctg_ids > round1/ctg/${f}.ctg.fa
+
+done
 ```
 
 ---
 
-# **3. Split genome & AGP per chromosome**
-After enrichment, splitting reduces computational load:
-
-```bash
-perl collapse_chr_from_agp.pl raw_genome.fa raw_agp.agp chr_list
-```
-
-This generates:
-
-- `<chr>.fa`
-- `<chr>.agp`
-
-for each chromosome.
-
----
-
-# **4. Run ragtag patching for each chromosome**
+# **3. Run ragtag patching for each chromosome**
 
 Example for chromosome `Chr1`:
 
 ## **Round 1 ragtag patching**
 ```bash
 ragtag.py patch \
-    Chr1.fa \
-    patch_candidates.fa \
-    -o Chr1_round1
+  --debug \
+  -i 0.99 \
+  --remove-small \
+  -q 10 \
+  -u \
+  --aligner minimap2 \
+  --mm2-params "-cx asm5 -t 32" \
+  -o round1/Chr1_round1 \
+  round1/ref/Chr1.fa
+  round1/ctg/Chr1.ctg.fa
 ```
 
 Output:
@@ -187,21 +194,28 @@ Output:
 
 ---
 
-# **5. Filter alignments by DE**
+# **4. Filter alignments by DE**
 ```bash
-perl filter_paf_by_de.pl Chr1_round1/ragtag.patch.asm.paf > filtered.paf
-mv filtered.paf Chr1_round1/ragtag.patch.asm.paf
+perl filter_paf_by_de.pl round1/Chr1_round1/ragtag.patch.asm.paf > filtered.paf
+mv filtered.paf round1/Chr1_round1/ragtag.patch.asm.paf
 ```
 
 ---
 
-# **6. Ragtag second pass (reuse filtered alignments)**
+# **5. Rerun ragtag  (reuse filtered alignments)**
 
 ```bash
 ragtag.py patch \
-    Chr1.fa \
-    patch_candidates.fa \
-    -o Chr1_round2
+  --debug \
+  -i 0.99 \
+  --remove-small \
+  -q 10 \
+  -u \
+  --aligner minimap2 \
+  --mm2-params "-cx asm5 -t 32" \
+  -o round1/Chr1_round1 \
+  round1/ref/Chr1.fa
+  round1/ctg/Chr1.ctg.fa
 ```
 
 This step is very fast because ragtag will reuse filtered PAF alignments.
@@ -210,29 +224,7 @@ Output:
 - `Chr1_round2/ragtag.patch.fasta`
 - `Chr1_round2/ragtag.patch.agp`
 
-Repeat steps 4–6 for all chromosomes.
-
----
-
-# 🔁 Multi-Round Patching
-
-If further patching is needed:
-
-## **1. Convert patched AGP back to contig-level FASTA**
-```bash
-perl split_scaffold_by_agp.pl \
-    Chr1_round2/ragtag.patch.agp \
-    Chr1_round2/ragtag.patch.fasta \
-    > new_contigs.fa
-```
-
-## **2. Use new output as next round’s input**
-Set:
-- `raw_genome = patched.fa`
-- `raw_agp = patched.agp`
-- `patch_ctg = new_contigs.fa`
-
-Repeat from **Step 1**.
+Repeat steps 3–5 for all chromosomes.
 
 ---
 
