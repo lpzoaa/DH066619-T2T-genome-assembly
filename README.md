@@ -1,4 +1,4 @@
-# LG-Patch（Large Genome Patch）
+# LG-Patch（Large Genome Gap Patch）
 [![Snakemake](https://img.shields.io/badge/Snakemake-Workflow-blue.svg)](https://snakemake.github.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -21,8 +21,8 @@ The following tools are required and are assumed to be available in your environ
 ## Installation
 Clone repository:
 ```
-git clone https://github.com/lpzoaa/DH066619-T2T-genome-assembly.git
-cd DH066619-T2T-genome-assembly
+git clone https://github.com/lpzoaa/DH066619_T2T_genome_assembly.git
+cd DH066619_T2T_genome_assembly
 ```
 
 ## Configuration
